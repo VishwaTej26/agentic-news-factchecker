@@ -1,5 +1,5 @@
 from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
 from agents.entity_tracker_agent import load_entities
 from agents.memory_agent import search_similar
 from config import OPENAI_API_KEY, LLM_MODEL, LLM_TEMPERATURE

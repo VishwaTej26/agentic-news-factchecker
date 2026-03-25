@@ -1,13 +1,15 @@
-import requests
+from tavily import TavilyClient
 from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
-from config import OPENAI_API_KEY, LLM_MODEL, LLM_TEMPERATURE, MIN_SOURCES_FOR_VERDICT
+from langchain_core.prompts import ChatPromptTemplate
+from config import OPENAI_API_KEY, LLM_MODEL, LLM_TEMPERATURE, TAVILY_API_KEY
 
 llm = ChatOpenAI(
     model=LLM_MODEL,
     temperature=LLM_TEMPERATURE,
     openai_api_key=OPENAI_API_KEY
 )
+
+tavily = TavilyClient(api_key=TAVILY_API_KEY)
 
 prompt = ChatPromptTemplate.from_template("""
 You are a professional fact-checker. Given a claim and evidence from multiple sources,
@@ -24,28 +26,31 @@ CONFIDENCE: 0.0 to 1.0
 REASONING: one or two sentence explanation
 """)
 
+def is_valid_claim(claim: str) -> bool:
+    if not claim or len(claim.strip()) < 10:
+        return False
+    skip_phrases = [
+        "none", "none identified", "a required part",
+        "browser extension", "check your connection",
+        "disable any ad blockers"
+    ]
+    claim_lower = claim.lower().strip()
+    return not any(phrase in claim_lower for phrase in skip_phrases)
+
 def search_evidence(claim: str) -> list[dict]:
     sources = []
     try:
-        url = f"https://api.search.brave.com/res/v1/web/search?q={claim}&count=5"
-        # fallback to duckduckgo instant answer
-        ddg_url = f"https://api.duckduckgo.com/?q={claim}&format=json&no_html=1"
-        response = requests.get(ddg_url, timeout=10)
-        data = response.json()
-        if data.get("AbstractText"):
+        results = tavily.search(
+            query=claim,
+            search_depth="basic",
+            max_results=5
+        )
+        for r in results.get("results", []):
             sources.append({
-                "source": data.get("AbstractSource", "DuckDuckGo"),
-                "text": data.get("AbstractText", ""),
-                "url": data.get("AbstractURL", "")
+                "source": r.get("url", "unknown"),
+                "text": r.get("content", "")[:300],
+                "url": r.get("url", "")
             })
-        if data.get("RelatedTopics"):
-            for topic in data["RelatedTopics"][:3]:
-                if isinstance(topic, dict) and topic.get("Text"):
-                    sources.append({
-                        "source": "DuckDuckGo Related",
-                        "text": topic.get("Text", ""),
-                        "url": topic.get("FirstURL", "")
-                    })
     except Exception as e:
         print(f"[FactCheck] Search error: {e}")
     return sources
@@ -54,7 +59,7 @@ def format_evidence(sources: list[dict]) -> str:
     if not sources:
         return "No external evidence found."
     return "\n".join([
-        f"Source {i+1} ({s['source']}): {s['text'][:300]}"
+        f"Source {i+1} ({s['source']}): {s['text']}"
         for i, s in enumerate(sources)
     ])
 
@@ -101,7 +106,9 @@ def run_factcheck(articles: list[dict]) -> list[dict]:
     for article in articles:
         claims = article.get("claims", [])
         verdicts = []
-        for claim in claims[:3]:  # max 3 claims per article to save API cost
+        for claim in claims[:3]:
+            if not is_valid_claim(claim):
+                continue
             verdict = factcheck_claim(claim)
             verdicts.append(verdict)
         article["verdicts"] = verdicts
