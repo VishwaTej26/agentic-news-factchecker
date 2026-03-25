@@ -1,5 +1,6 @@
 import chromadb
 import json
+import hashlib
 from datetime import datetime
 from chromadb.utils import embedding_functions
 from config import CHROMA_DB_PATH, COLLECTION_NAME, OPENAI_API_KEY
@@ -17,7 +18,12 @@ collection = client.get_or_create_collection(
 
 def store_article(article: dict):
     try:
-        doc_text = f"{article.get('title', '')} {article.get('content', '')[:500]}"
+        verdict_summary = ""
+        for v in article.get("verdicts", []):
+            verdict_summary += f"CLAIM: {v.get('claim','')} | VERDICT: {v.get('verdict','')} | CONFIDENCE: {v.get('confidence',0)} | REASONING: {v.get('reasoning','')} "
+
+        doc_text = f"{article.get('title', '')} {article.get('content', '')[:300]} {verdict_summary}"
+
         metadata = {
             "title": article.get("title", "")[:100],
             "source": article.get("source", "unknown"),
@@ -26,12 +32,15 @@ def store_article(article: dict):
             "published_at": article.get("published_at", ""),
             "ingested_at": article.get("ingested_at", datetime.utcnow().isoformat()),
             "verdict_count": len(article.get("verdicts", [])),
+            "main_verdict": article.get("verdicts", [{}])[0].get("verdict", "unverified") if article.get("verdicts") else "unverified",
+            "main_confidence": str(article.get("verdicts", [{}])[0].get("confidence", 0.0)) if article.get("verdicts") else "0.0",
         }
         collection.upsert(
             documents=[doc_text],
             metadatas=[metadata],
-            ids=[article.get("hash", doc_text[:50])]
+            ids=[article.get("hash", hashlib.md5(doc_text[:50].encode()).hexdigest())]
         )
+        print(f"[Memory] Stored: {article.get('title','')[:60]}")
     except Exception as e:
         print(f"[Memory] Store error: {e}")
 
@@ -54,7 +63,7 @@ def get_past_verdict(claim: str) -> dict | None:
         )
         if results and results["distances"][0]:
             distance = results["distances"][0][0]
-            if distance < 0.15:  # very similar claim
+            if distance < 0.15:
                 return results["metadatas"][0][0]
     except Exception as e:
         print(f"[Memory] Verdict lookup error: {e}")
