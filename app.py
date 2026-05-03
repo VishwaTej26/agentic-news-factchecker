@@ -9,6 +9,9 @@ from agents.entity_tracker_agent import load_entities, update_entity, save_entit
 from utils.helpers import format_verdict_emoji
 from config import OPENAI_API_KEY, LLM_MODEL
 
+
+# uses chatgpt api
+
 st.set_page_config(
     page_title="Agentic News Fact-Checker",
     page_icon="🔍",
